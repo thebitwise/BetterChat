@@ -1,0 +1,532 @@
+--$$\        $$$$$$\  $$\   $$\  $$$$$$\  $$$$$$$$\ 
+--$$ |      $$  __$$\ $$$\  $$ |$$  __$$\ $$  _____|
+--$$ |      $$ /  $$ |$$$$\ $$ |$$ /  \__|$$ |      
+--$$ |      $$$$$$$$ |$$ $$\$$ |$$ |      $$$$$\    
+--$$ |      $$  __$$ |$$ \$$$$ |$$ |      $$  __|   
+--$$ |      $$ |  $$ |$$ |\$$$ |$$ |  $$\ $$ |      
+--$$$$$$$$\ $$ |  $$ |$$ | \$$ |\$$$$$$  |$$$$$$$$\ 
+--\________|\__|  \__|\__|  \__| \______/ \________|
+-- coded by Lance/stonerchrist on Discord
+util.require_natives("2944b", "g")
+local json = require('json')
+local encryption = require('encryption')
+
+
+if json == nil then 
+    util.toast("You must have JSON installed to use this script. Install it on the repository.")
+    util.stop_script()
+end
+
+local cooldowns = {}
+local endpoint = "https://api.openai.com/v1/completions"
+local root = menu.my_root()
+local general_settings_root = root:list('General settings')
+local encryption_root = root:list('Encryption')
+local colors_root = root:list('Colors')
+local positioning_root = root:list('Positioning')
+
+local translation_root = root:list('Translations')
+local antispam_root = root:list('Anti-Spam')
+local keybinds_root = root:list('Keybinds', {'bckeybinds'}, 'Mouse over a command in this menu and use Stand\'s context menu to bind each chat function to a key\n(key for context menu is usually O)')
+
+local resources_dir =  filesystem.resources_dir() .. '\\betterchat\\'
+if not filesystem.is_dir(resources_dir) then
+    util.toast("[BetterChat] Resources dir is missing. The script will now exit.")
+    util.stop_script()
+end
+
+local store_dir = filesystem.store_dir() .. '\\betterchat\\' 
+if not filesystem.is_dir(store_dir) then 
+    if not SCRIPT_SILENT_START then 
+        util.toast("Welcome to BetterChat! To get started, set keybinds in the keybinds section to send chats.\nEnjoy!")
+        util.toast("You may also wish to go into the Translations section and set an API key there to turn on AI translating.")
+        filesystem.mkdir(store_dir)
+    end
+end
+
+local api_key_dir = store_dir .. 'api_key.txt'
+if not filesystem.exists(api_key_dir) then 
+    local file = io.open(api_key_dir,'w')
+    file:write("None")
+    file:close()
+end
+
+local f = io.open(api_key_dir,'r')
+local api_key = f:read('a')
+f:close()
+
+
+local do_encryption = false
+encryption_root:toggle('Encryption and decryption', {}, 'Automatically encrypts chats you send using the key below.\nWill also auto-decrypt chats from chats with the prefix [enc], but may appear to be nonsense if the key is not the same.', function(on)
+    do_encryption = on
+end, false)
+
+local key_1 = math.random(-32768, 32767)
+local key_2 = math.random(1000, 9999)
+
+encryption_root:slider('Encryption key 1', {'bcencryptkey1'}, 'Share this with whomever you want to be able to decrypt the messages.', -32768, 32767, key_1, 1, function(key)
+    key_1 = key
+end, key_1)
+
+
+encryption_root:slider('Encryption key 2', {'bcencryptkey2'}, 'Share this with whomever you want to be able to decrypt the messages.', -9999, 9999, key_2, 1, function(key)
+    key_2 = key
+end, key_2)
+
+
+translation_root:hyperlink("Get API key", 'https://platform.openai.com/account/api-keys')
+
+translation_root:action("Set OpenAI API key", {"bcchtgptkey"}, "DO NOT SHARE THIS.\nClick and paste in your API key.", function(on_click)
+    menu.show_command_box("bcchtgptkey ")
+end, function(on_command)
+    if not string.startswith(on_command, 'sk-') then 
+        util.toast("Invalid API key.")
+    else
+        local file = io.open(api_key_dir,'w')
+        file:write(on_command)
+        file:close()
+        api_key = on_command
+        util.toast("OpenAI API key saved.")
+    end
+end)
+
+
+local translate_in = false
+translation_root:toggle("Translate incoming messages", {'bctranslatein'}, '', function(on)
+    if api_key == 'None' then 
+        util.toast('You must set an OpenAI API key before using this feature.')
+        menu.trigger_commands('bctranslatein off')
+    end
+    translate_in = on
+end, false)
+
+local translate_out = false
+translation_root:toggle("Translate outgoing messages", {'bctranslateout'}, '', function(on)
+    if api_key == 'None' then 
+        util.toast('You must set an OpenAI API key before using this feature.')
+        menu.trigger_commands('bctranslateout off')
+    end
+    translate_out = on
+end, false)
+
+local gpt_instr_out = 'Translate the following message into Portuguese.'
+local gpt_instr_in = 'Translate the following message into English.'
+
+translation_root:text_input("GPT instruction for other chats", {'bcgptininstr'}, 'The instruction to tell ChatGPT before the incoming chat message.\nie \'Translate the following message into English."', function(instr)
+    gpt_instr_in = instr 
+end, gpt_instr_in)
+
+translation_root:text_input("GPT instruction for your chats", {'bcgptoutinstr'}, 'The instruction to tell ChatGPT before the outgoing chat message.\nie \'Translate the following message into Portuguese."', function(instr)
+    gpt_instr_out = instr 
+end, gpt_instr_out)
+
+
+local temperature = 0.8
+local ai_response = nil 
+
+local function ask_ai(prompt, system)
+    async_http.init('api.openai.com', '/v1/chat/completions', function(data)
+        if data['error'] ~= nil then 
+            util.toast("OpenAI error: " .. data['error'] )
+            return
+        end
+        local response = json.decode(data)
+        if not response then 
+            util.toast("Received an empty response from OpenAI")
+            return
+        end
+        if response['choices'] == nil then 
+            util.toast("There was an issue reaching OpenAI " .. data )
+            return
+        end
+        ai_response = response['choices'][1]['message']['content']
+    end, function()
+        util.toast("There was an issue reaching OpenAI")
+    end)
+    async_http.add_header("Authorization", "Bearer " .. api_key)
+    local messages = {
+        {
+            role = 'system',
+            content = system .. ' If it is already, return \"True":' .. prompt
+        },
+        {
+            role = 'user',
+            content = prompt
+        }
+    }
+    local payload = {
+        model = 'gpt-3.5-turbo',
+        max_tokens = 20,
+        temperature = temperature,
+        messages = messages
+    }
+    async_http.set_post("application/json", json.encode(payload))
+    async_http.dispatch()
+end
+
+local min_time_between_messages
+antispam_root:slider('Min MS between messages ', {}, 'Messages sent after exceeding this threshold will not be shown and you will not be notified.', 10, 1000, 300, 1, function(val)
+    min_time_between_messages = val 
+end)
+
+local function playWav(wav)
+    local fr = soup.FileReader(wav)
+    local wav = soup.audWav(fr)
+    local dev = soup.audDevice.getDefault()
+    local pb = dev:open(wav.channels)
+    local mix = soup.audMixer()
+    mix.stop_playback_when_done = true
+    mix:setOutput(pb)
+    mix:playSound(wav)
+    while pb:isPlaying() do util.yield() end
+end
+
+local chat_history = {}
+local show_chat = false 
+local chat_right_bound = 0.99999
+local chat_history_len = 5
+local chat_top_bound = 0.4
+local font = nil 
+local is_typing = false
+local text_scale = 0.5
+local brackets = true 
+local total_chat_lifetime = 5
+local time_of_last_message = os.time()
+local furthest_left_name = 0.0
+local play_sound = true 
+
+root:action("Clear history", {'bcclear'}, 'Clears BetterChat history (does not touch actual chat history)\nWhy not bind this to a key?', function()
+    chat_history = {}
+end)
+
+general_settings_root:toggle('Sound', {}, '', function(on) 
+    play_sound = on 
+end, true)
+
+local session_clear = true
+general_settings_root:toggle('Clear history after leaving session', {}, '', function(on) 
+    session_clear = on 
+end, true)
+
+local cleared_this_transition = false 
+util.create_tick_handler(function()
+    if session_clear then 
+        if util.is_session_transition_active() then
+            if not cleared_this_transition then 
+                chat_history = {}
+                cleared_this_transition = true
+            end
+        end
+    end
+end)
+
+general_settings_root:divider("On new message")
+general_settings_root:slider('Show chat for x seconds', {'bcchatlifetime'}, '', 1, 300, 5, 1, function(value) 
+    total_chat_lifetime = value 
+end)
+
+local original_len = chat_history_len
+
+general_settings_root:divider('History')
+general_settings_root:slider('Max displayed chats', {'bcmaxchats'}, '', 1, 100, 5, 1, function(value) 
+    chat_history_len = value 
+    original_len = value 
+end)
+
+positioning_root:slider_float('Top bound', {"bctopbound"}, '', 0, 1000, 40, 1, function(value)
+    chat_top_bound = value * 0.01
+end)
+
+positioning_root:slider_float('Right bound', {"bctopbound"}, '', 1, 100, 99, 1, function(value)
+    chat_right_bound = value * 0.01
+end)
+
+
+local bg_color = {r = 0, g = 0, b = 0, a = 0.6}
+colors_root:colour("BG color", {"bcbg"}, "", bg_color, false, function(color)
+    bg_color = color
+end)
+
+
+local generic_text_color = {r = 1, g = 1, b = 1, a = 1}
+colors_root:colour("Primary text color", {"bcprimary"}, "", generic_text_color, false, function(color)
+    generic_text_color = color
+end)
+
+local team_color = {r = 0, g = 1, b = 0, a = 1}
+colors_root:colour("Team color", {"bcteam"}, "", team_color, false, function(color)
+    team_color = color
+end)
+
+local translated_color = {r = 0, g = 0.6, b = 0.2, a = 1}
+colors_root:colour("Translated color", {"bctranslated"}, "", translated_color, false, function(color)
+    translated_color = color
+end)
+
+local encrypted_color = {r = 0.2, g = 1, b = 0.6, a = 1}
+colors_root:colour("Encrypted color", {"bcencrypted"}, "", encrypted_color, false, function(color)
+    encrypted_color = color
+end)
+
+local friend_name_color = {r = 0, g = 1, b = 1, a = 1}
+colors_root:colour("Friend name color", {"bcfriend"}, "", friend_name_color, false, function(color)
+    friend_name_color = color
+end)
+
+local me_name_color = {r = 1, g = 0, b = 1, a = 1}
+colors_root:colour("My name color", {"bcme"}, "", me_name_color, false, function(color)
+    me_name_color = color
+end)
+
+local modder_name_color = {r = 1, g = 0, b = 0, a = 1}
+colors_root:colour("Modder name color", {"bcmodder"}, "", modder_name_color, false, function(color)
+    modder_name_color = color
+end)
+
+keybinds_root:action("Send regular chat", {'bcs'}, '', function()
+    menu.show_command_box('bcs ')
+end, function(text) 
+    if do_encryption then
+        text = encryption.encode(text, key_1, key_2)
+        chat.send_message('[enc]' .. text, false, true, true)
+    else
+        chat.send_message(text, false, true, true)
+    end
+end)
+
+keybinds_root:action("Send team chat", {'bct'}, '', function()
+    menu.show_command_box('bct ')
+end, function(text) 
+    if do_encryption then
+        text = encryption.encode(text, key_1, key_2)
+        chat.send_message('[enc]' .. text, true, true, true)
+    else
+        chat.send_message(text, false, true, true)
+    end
+end)
+
+local muted_players = {}
+
+function lang_num_to_name(num) 
+    local langs =
+    {
+        'English',
+        'French', 
+        'German',
+        'Spanish',
+        'Portuguese',
+        'Polish',
+        'Russian',
+        'Korean',
+        'Chinese (Traditional)',
+        'Japanese', 
+        'Mexican', 
+        'Chinese (Simplified)'
+    }
+
+    if langs[num + 1] == nil then 
+        return '???'
+    else
+        return langs[num + 1]
+    end
+end
+
+
+
+players.on_join(function(pid)
+    if players.get_name(pid) == "UndiscoveredPlayer" then 
+        util.yield()
+    end
+    local p_root = menu.player_root(pid)
+    p_root:divider('BetterChat')
+    p_root:readonly('Speaks: ' .. lang_num_to_name(players.get_language(pid)))
+    p_root:toggle('Mute player', {}, '', function(on) 
+        if on then
+            muted_players[pid] = true 
+        else
+            muted_players[pid] = nil 
+        end
+    end)
+
+end)
+
+
+players.dispatch_on_join()
+
+util.create_tick_handler(function()
+    if menu.command_box_is_open() then 
+        time_of_last_message = os.time()
+        chat_history_len = 25
+    else 
+        chat_history_len = original_len
+    end
+end)
+
+function create_chat_object(pid, text, team_chat, was_translated, was_encrypted)
+    local chat = {
+        name = players.get_name(pid),
+        text = text, 
+        pid = pid,
+        team_chat = team_chat,
+        birth = os.time(),
+        was_translated = was_translated,
+        was_encrypted = was_encrypted
+    }
+    return chat 
+end
+
+function unmute_after_time(pid, delay)
+    util.create_thread(function()
+        util.yield(delay)
+        cooldowns[pid] = nil 
+    end)
+end
+
+chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
+    if muted_players[sender] == nil then
+        if cooldowns[sender] ~= nil and sender ~= players.user() then 
+            return 
+        end
+
+        time_of_last_message = os.time()
+        was_translated = false
+        was_encrypted = false 
+
+        if string.contains(text, '[enc]') then
+            _, text = string.partition(text, '[enc]')
+            text = encryption.decode(text, key_1, key_2)
+            was_encrypted = true
+        end
+
+        if sender ~= players.user() then
+            if translate_in then 
+                ai_response = nil
+                ask_ai(text, gpt_instr_in)
+                local st_time = os.time()
+                while not ai_response do 
+                    if os.time() - st_time >= 5 then 
+                        util.toast("Could not translate " .. players.get_name(sender) .. '\'s message in time')
+                        return 
+                    end
+                    util.draw_debug_text('Translating message from ' .. players.get_name(sender) .. ' ...')
+                    util.yield() 
+                end
+                if ai_response ~= 'True' then 
+                    text = ai_response
+                    was_translated = true
+                end
+            end
+        else
+            if translate_out then 
+                ai_response = nil
+                ask_ai(text, gpt_instr_out)
+                st_time = os.time()
+                while not ai_response do
+                    if os.time() - st_time >= 5 then 
+                        util.toast("Could not receive a response from ChatGPT in time. Canceling translation.")
+                        return 
+                    end
+                    util.draw_debug_text('Translating...')
+                    util.yield() 
+                end
+                if ai_response ~= 'True' then 
+                    text = ai_response
+                    was_translated = true
+                end
+            end
+        end
+        chat_history[#chat_history+1] = create_chat_object(sender, text, team_chat, was_translated, was_encrypted)
+        if play_sound and sender ~= players.user() then 
+            playWav(resources_dir .. '\\message.wav')
+        end
+        cooldowns[sender] = true 
+        unmute_after_time(sender, min_time_between_messages)
+    end
+end)
+
+local temp_ptr = memory.alloc(13*8)
+local function pid_to_handle(pid)
+    NETWORK_HANDLE_FROM_PLAYER(pid, temp_ptr, 13)
+    return temp_ptr
+end
+
+local function get_last_x_elements(tbl, x)
+    local tableLength = #tbl
+    local last_elements = {}
+    for i = tableLength - (x-1), tableLength do
+        table.insert(last_elements, tbl[i])
+    end
+    return last_elements
+end 
+
+
+util.create_tick_handler(function ()
+    MP_TEXT_CHAT_DISABLE(true)
+    local cur_chat_line = 1
+    local last_x_chats = get_last_x_elements(chat_history, chat_history_len)
+    local show_chat = true 
+    if os.time() - time_of_last_message >= total_chat_lifetime then 
+        show_chat = false 
+    end
+
+    if show_chat then 
+        furthest_left_name = 0
+        for chat_index, chat in pairs(last_x_chats) do 
+            -- draw name 
+            local name = chat.name
+            if brackets then 
+                name = "[" .. name .. "]"
+            end
+
+            local cur_color_to_use = generic_text_color
+            local hdl = pid_to_handle(chat.pid)
+            if NETWORK_IS_FRIEND(hdl) then
+                cur_color_to_use = friend_name_color
+            elseif players.is_marked_as_modder(chat.pid) then 
+                cur_color_to_use = modder_name_color
+            end
+
+            if chat.pid == players.user() then 
+                cur_color_to_use = me_name_color
+            end
+
+            if chat.team_chat then 
+                cur_color_to_use = team_color
+            end
+
+            -- calculate how long this message will be so we can determine where to place the name tag 
+            local message_x, message_y = directx.get_text_size(chat.text, text_scale)
+
+            local name_x, name_y = directx.get_text_size(chat.name, text_scale)
+            local total_x = (name_x + message_x) + 0.01
+
+            if total_x > furthest_left_name then
+                furthest_left_name = total_x
+            end
+
+            local text_color = generic_text_color 
+            if chat.was_translated then 
+                text_color = translated_color 
+            end
+
+            if chat.was_encrypted then 
+                text_color = encrypted_color
+            end
+
+            local center_x = (chat_right_bound - furthest_left_name) - 0.004
+            directx.draw_rect(center_x, (chat_top_bound + (cur_chat_line * message_y)) - (text_scale / 60), furthest_left_name + 0.04, message_y, bg_color)
+            --directx.draw_rect(center_x, chat_top_bound + 0.05, furthest_left_name + 0.2, message_y + 0.2, bg_color)
+            directx.draw_text(chat_right_bound - (message_x + 0.002), chat_top_bound + (cur_chat_line * message_y), name .. ':', 6, text_scale, cur_color_to_use, false, font)
+            directx.draw_text(chat_right_bound, chat_top_bound + (cur_chat_line * message_y), chat.text, 6, text_scale, text_color, false, font)
+            cur_chat_line += 1
+        end
+
+    end
+end)
+
+util.on_stop(function()
+    MP_TEXT_CHAT_DISABLE(false)
+end)
+
+menu.my_root():divider('')
+menu.my_root():hyperlink('Join Discord', 'https://discord.gg/zZ2eEjj88v', '')
