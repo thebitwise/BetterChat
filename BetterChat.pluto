@@ -283,9 +283,52 @@ colors_root:colour("Modder name color", {"bcmodder"}, "", modder_name_color, fal
     modder_name_color = color
 end)
 
-keybinds_root:action("Send regular chat", {'bcs'}, '', function()
+function get_player_from_name(name)
+    for _, _pid in players.list(true, true, true) do
+        p_name = players.get_name(_pid)
+        if p_name then
+            if string.contains(string.lower(p_name), string.lower(name)) then 
+                return {pid = _pid, name = players.get_name(_pid)}
+            end
+        end
+    end
+    return -1
+end
+
+keybinds_root:action("Send chat", {'bcs'}, '', function()
     menu.show_command_box('bcs ')
-end, function(text) 
+end, function(text)
+    if string.startswith(text, '/') then
+        _, text = string.partition(text, '/')
+        local command, command_arg = string.partition(text, ' ')
+        if not command or not command_arg then 
+            chat_history[#chat_history+1] = create_chat_object(players.user(), 'Missing arguments', false, false, false, true, 0)
+            return
+        end
+        command = string.lower(command)
+        pluto_switch command do 
+            case 'pm':
+                local target_name, text = string.partition(command_arg, ' ')
+                if not text or not target_name then 
+                    chat_history[#chat_history+1] = create_chat_object(players.user(), 'Missing arguments', false, false, false, true, 0)
+                    return 
+                end
+                local data = get_player_from_name(target_name)
+                local tar_pid = data.pid
+                local player_name = data.name
+                if data.pid == -1 then 
+                    chat_history[#chat_history+1] = create_chat_object(players.user(), 'Player not found', false, false, false, true, 0)
+                    return
+                end
+                chat_history[#chat_history+1] = create_chat_object(players.user(), text, false, false, false, false, 1, data.pid)
+                chat.send_targeted_message(data.pid, players.user(), '[pm]' .. text, false)
+                return
+                break
+            default:
+                chat_history[#chat_history+1] = create_chat_object(players.user(), 'Command not found', false, false, false, true, 0)
+                break
+        end
+    end
     if do_encryption then
         text = encryption.encode(text, key_1, key_2)
         chat.send_message('[enc]' .. text, false, true, true)
@@ -340,12 +383,17 @@ players.on_join(function(pid)
     local p_root = menu.player_root(pid)
     p_root:divider('BetterChat')
     p_root:readonly('Speaks: ' .. lang_num_to_name(players.get_language(pid)))
+
     p_root:toggle('Mute player', {}, '', function(on) 
         if on then
             muted_players[pid] = true 
         else
             muted_players[pid] = nil 
         end
+    end)
+
+    p_root:action('PM player', {}, '', function(on) 
+        menu.show_command_box('bcs /pm ' .. players.get_name(pid) .. ' ')
     end)
 
 end)
@@ -362,7 +410,7 @@ util.create_tick_handler(function()
     end
 end)
 
-function create_chat_object(pid, text, team_chat, was_translated, was_encrypted)
+function create_chat_object(pid, text, team_chat, was_translated, was_encrypted, is_system, pm_mode, pm_target)
     local chat = {
         name = players.get_name(pid),
         text = text, 
@@ -370,8 +418,28 @@ function create_chat_object(pid, text, team_chat, was_translated, was_encrypted)
         team_chat = team_chat,
         birth = os.time(),
         was_translated = was_translated,
-        was_encrypted = was_encrypted
+        was_encrypted = was_encrypted,
+        pm_target = pm_target
     }
+
+    if is_system then 
+        chat.name = 'SYSTEM'
+        chat.pid = players.user()
+    end
+
+    pluto_switch pm_mode do 
+        case 0:
+            break
+        case 1:
+            chat.name = 'PM to ' .. players.get_name(chat.pm_target)
+            chat.text = chat.text:gsub('[pm]', '')
+            break
+        case 2:
+            chat.name = 'PM from ' .. players.get_name(chat.pm_target)
+            chat.text = chat.text:gsub('[pm]', '')
+            break 
+    end
+
     return chat 
 end
 
@@ -383,6 +451,14 @@ function unmute_after_time(pid, delay)
 end
 
 chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
+    local pm_mode = 0
+    local pm_target = 0
+
+    if string.contains(text, '[pm]') then 
+        pm_mode = 1
+        pm_target = players.user()
+    end
+
     if muted_players[sender] == nil then
         if cooldowns[sender] ~= nil and sender ~= players.user() then 
             return 
@@ -411,10 +487,12 @@ chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
                     util.draw_debug_text('Translating message from ' .. players.get_name(sender) .. ' ...')
                     util.yield() 
                 end
+
                 if ai_response ~= 'True' then 
                     text = ai_response
                     was_translated = true
                 end
+
             end
         else
             if translate_out then 
@@ -435,7 +513,7 @@ chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
                 end
             end
         end
-        chat_history[#chat_history+1] = create_chat_object(sender, text, team_chat, was_translated, was_encrypted)
+        chat_history[#chat_history+1] = create_chat_object(sender, text, team_chat, was_translated, was_encrypted, false, pm_mode, pm_target)
         if play_sound and sender ~= players.user() then 
             playWav(resources_dir .. '\\message.wav')
         end
