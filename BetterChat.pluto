@@ -183,7 +183,7 @@ end
 
 local chat_history = {}
 local show_chat = false 
-local chat_right_bound = 0.99999
+local chat_right_bound = 1.0
 local chat_history_len = 5
 local chat_top_bound = 0.4
 local font = nil 
@@ -220,6 +220,12 @@ util.create_tick_handler(function()
     end
 end)
 
+local max_chat_len = 80
+general_settings_root:slider('Max chat len', {'bcmaxchatlen'}, 'Chats that are longer than this length will be cut up', 1, 1000, 80, 1, function(value) 
+    max_chat_len = value
+end)
+
+
 general_settings_root:divider("On new message")
 general_settings_root:slider('Show chat for x seconds', {'bcchatlifetime'}, '', 1, 300, 5, 1, function(value) 
     total_chat_lifetime = value 
@@ -237,8 +243,8 @@ positioning_root:slider_float('Top bound', {"bctopbound"}, '', 0, 1000, 40, 1, f
     chat_top_bound = value * 0.01
 end)
 
-positioning_root:slider_float('Right bound', {"bctopbound"}, '', 1, 100, 99, 1, function(value)
-    chat_right_bound = value * 0.01
+positioning_root:slider_float('Right bound', {"bctopbound"}, '', 1, 1000, 1000, 1, function(value)
+    chat_right_bound = value * 0.001
 end)
 
 
@@ -450,6 +456,22 @@ function unmute_after_time(pid, delay)
     end)
 end
 
+function split_string(str, maxLength)
+    local result = {}
+    local currentChunk = ""
+
+    for i = 1, #str do
+        currentChunk = currentChunk .. string.sub(str, i, i)
+
+        if #currentChunk >= maxLength or i == #str then
+            table.insert(result, currentChunk)
+            currentChunk = ""
+        end
+    end
+
+    return result
+end
+
 chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
     local pm_mode = 0
     local pm_target = 0
@@ -513,7 +535,16 @@ chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
                 end
             end
         end
-        chat_history[#chat_history+1] = create_chat_object(sender, text, team_chat, was_translated, was_encrypted, false, pm_mode, pm_target)
+        if #text > 100 then
+            local chunks = split_string(text, max_chat_len)
+
+            for i, chunk in ipairs(chunks) do
+                chat_history[#chat_history+1] = create_chat_object(sender, chunk, team_chat, was_translated, was_encrypted, false, pm_mode, pm_target)
+            end
+        else
+            chat_history[#chat_history+1] = create_chat_object(sender, text, team_chat, was_translated, was_encrypted, false, pm_mode, pm_target)
+        end
+
         if play_sound and sender ~= players.user() then 
             playWav(resources_dir .. '\\message.wav')
         end
@@ -595,7 +626,7 @@ util.create_tick_handler(function ()
             directx.draw_rect(center_x, (chat_top_bound + (cur_chat_line * message_y)) - (text_scale / 60), furthest_left_name + 0.04, message_y, bg_color)
             --directx.draw_rect(center_x, chat_top_bound + 0.05, furthest_left_name + 0.2, message_y + 0.2, bg_color)
             directx.draw_text(chat_right_bound - (message_x + 0.002), chat_top_bound + (cur_chat_line * message_y), name .. ':', 6, text_scale, cur_color_to_use, false, font)
-            directx.draw_text(chat_right_bound, chat_top_bound + (cur_chat_line * message_y), chat.text, 6, text_scale, text_color, false, font)
+            directx.draw_text(chat_right_bound + 0.003, chat_top_bound + (cur_chat_line * message_y), chat.text, 6, text_scale, text_color, false, font)
             cur_chat_line += 1
         end
 
