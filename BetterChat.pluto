@@ -460,17 +460,26 @@ function split_string(str, maxLength)
     local result = {}
     local currentChunk = ""
 
-    for i = 1, #str do
-        currentChunk = currentChunk .. string.sub(str, i, i)
-
-        if #currentChunk >= maxLength or i == #str then
+    for word in str:gmatch("%S+") do
+        if #currentChunk + #word + 1 <= maxLength then
+            if currentChunk == "" then
+                currentChunk = word
+            else
+                currentChunk = currentChunk .. " " .. word
+            end
+        else
             table.insert(result, currentChunk)
-            currentChunk = ""
+            currentChunk = word
         end
+    end
+
+    if currentChunk ~= "" then
+        table.insert(result, currentChunk)
     end
 
     return result
 end
+
 
 chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
     local pm_mode = 0
