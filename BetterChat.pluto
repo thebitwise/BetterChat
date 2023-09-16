@@ -248,8 +248,8 @@ positioning_root:slider_float('Right bound', {"bctopbound"}, '', 1, 1000, 1000, 
 end)
 
 
-local bg_color = {r = 0, g = 0, b = 0, a = 0.6}
-colors_root:colour("BG color", {"bcbg"}, "", bg_color, false, function(color)
+local bg_color = {r = 0, g = 0, b = 0, a = 0.4}
+colors_root:colour("BG color", {"bcbg"}, "", bg_color, true, function(color)
     bg_color = color
 end)
 
