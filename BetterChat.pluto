@@ -95,9 +95,10 @@ end, gpt_instr_out)
 
 
 local temperature = 0.8
-local ai_response = nil 
+local outgoing_resp = nil 
+local incoming_resp = nil
 
-local function ask_ai(prompt, system)
+local function ask_ai(prompt, system, outgoing)
     async_http.init('api.openai.com', '/v1/chat/completions', function(data)
         if data['error'] ~= nil then 
             util.toast("OpenAI error: " .. data['error'] )
@@ -112,7 +113,11 @@ local function ask_ai(prompt, system)
             util.toast("There was an issue reaching OpenAI " .. data )
             return
         end
-        ai_response = response['choices'][1]['message']['content']
+        if outgoing then
+            outgoing_resp = response['choices'][1]['message']['content']
+        else
+            incoming_resp = response['choices'][1]['message']['content']
+        end
     end, function()
         util.toast("There was an issue reaching OpenAI")
     end)
@@ -302,13 +307,46 @@ end, function(text)
                 chat_history[#chat_history+1] = create_chat_object(players.user(), 'Command not found', false, false, false, true, 0)
                 break
         end
+    else 
+        if translate_out then
+            outgoing_resp = nil
+            ask_ai(text, gpt_instr_out, true)
+            st_time = os.time()
+            while not outgoing_resp do
+                if os.time() - st_time >= 5 then 
+                    util.toast("Could not receive a response from ChatGPT in time. Canceling translation.")
+                    return 
+                end
+                util.draw_debug_text('Translating...')
+                util.yield() 
+            end
+            if outgoing_resp ~= 'True' then 
+                text = outgoing_resp
+            end
+        end
     end
     chat.send_message(text, false, true, true)
 end)
 
 keybinds_root:action("Send team chat", {'bct'}, '', function()
     menu.show_command_box('bct ')
-end, function(text) 
+end, function(text)
+    if translate_out then
+        outgoing_resp = nil
+        ask_ai(text, gpt_instr_out, true)
+        st_time = os.time()
+        while not outgoing_resp do
+            if os.time() - st_time >= 5 then 
+                util.toast("Could not receive a response from ChatGPT in time. Canceling translation.")
+                return 
+            end
+            util.draw_debug_text('Translating...')
+            util.yield() 
+        end
+        if outgoing_resp ~= 'True' then 
+            text = outgoing_resp
+        end
+    end
     chat.send_message(text, false, true, true)
 end)
 
@@ -457,10 +495,10 @@ chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
 
         if sender ~= players.user() then
             if translate_in then 
-                ai_response = nil
-                ask_ai(text, gpt_instr_in)
+                incoming_resp = nil
+                ask_ai(text, gpt_instr_in, false)
                 local st_time = os.time()
-                while not ai_response do 
+                while not incoming_resp do 
                     if os.time() - st_time >= 5 then 
                         util.toast("Could not translate " .. players.get_name(sender) .. '\'s message in time')
                         return 
@@ -469,30 +507,30 @@ chat.on_message(function(sender, reserved, text, team_chat, networked, is_auto)
                     util.yield() 
                 end
 
-                if ai_response ~= 'True' then 
-                    text = ai_response
+                if incoming_resp ~= 'True' then 
+                    text = incoming_resp
                     was_translated = true
                 end
 
             end
-        else
-            if translate_out then 
-                ai_response = nil
-                ask_ai(text, gpt_instr_out)
-                st_time = os.time()
-                while not ai_response do
-                    if os.time() - st_time >= 5 then 
-                        util.toast("Could not receive a response from ChatGPT in time. Canceling translation.")
-                        return 
-                    end
-                    util.draw_debug_text('Translating...')
-                    util.yield() 
-                end
-                if ai_response ~= 'True' then 
-                    text = ai_response
-                    was_translated = true
-                end
-            end
+        --else
+            --if translate_out then 
+            --    ai_response = nil
+            --    ask_ai(text, gpt_instr_out, true)
+            --    st_time = os.time()
+            --    while not ai_response do
+            --        if os.time() - st_time >= 5 then 
+            --            util.toast("Could not receive a response from ChatGPT in time. Canceling translation.")
+            --            return 
+            --        end
+            --        util.draw_debug_text('Translating...')
+            --        util.yield() 
+            --    end
+            --    if ai_response ~= 'True' then 
+            --        text = ai_response
+            --        was_translated = true
+            --    end
+            --end
         end
         if #text > 100 then
             local chunks = split_string(text, max_chat_len)
