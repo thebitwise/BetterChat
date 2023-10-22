@@ -601,9 +601,9 @@ util.create_tick_handler(function ()
             end
 
             -- calculate how long this message will be so we can determine where to place the name tag 
-            local message_x, message_y = directx.get_text_size(chat.text, text_scale)
+            local message_x, message_y = directx.get_text_size_client(chat.text, text_scale)
 
-            local name_x, name_y = directx.get_text_size(chat.name, text_scale)
+            local name_x, name_y = directx.get_text_size_client(chat.name, text_scale)
             local total_x = (name_x + message_x) + 0.01
 
             if total_x > furthest_left_name then
