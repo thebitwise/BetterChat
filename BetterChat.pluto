@@ -285,7 +285,7 @@ end, function(text)
             return
         end
         command = string.lower(command)
-        pluto_switch command do 
+        switch command do 
             case 'pm':
                 local target_name, text = string.partition(command_arg, ' ')
                 if not text or not target_name then 
@@ -428,7 +428,7 @@ function create_chat_object(pid, text, team_chat, was_translated, was_encrypted,
         chat.pid = players.user()
     end
 
-    pluto_switch pm_mode do 
+    switch pm_mode do 
         case 0:
             break
         case 1:
