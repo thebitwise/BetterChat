@@ -8,7 +8,6 @@
 --\________|\__|  \__|\__|  \__| \______/ \________|
 -- coded by Lance/stonerchrist on Discord
 util.require_natives("2944b", "g")
-pluto_use "0.5.0"
 
 local cooldowns = {}
 local endpoint = "https://api.openai.com/v1/completions"
@@ -286,7 +285,7 @@ end, function(text)
             return
         end
         command = string.lower(command)
-        switch command do 
+        pluto_switch command do 
             case 'pm':
                 local target_name, text = string.partition(command_arg, ' ')
                 if not text or not target_name then 
@@ -348,7 +347,7 @@ end, function(text)
             text = outgoing_resp
         end
     end
-    chat.send_message(text, false, true, true)
+    chat.send_message(text, true, true, true)
 end)
 
 local muted_players = {}
@@ -429,7 +428,7 @@ function create_chat_object(pid, text, team_chat, was_translated, was_encrypted,
         chat.pid = players.user()
     end
 
-    switch pm_mode do 
+    pluto_switch pm_mode do 
         case 0:
             break
         case 1:
